@@ -1,0 +1,25 @@
+{
+  "currency": {
+    "dbKey": "queue"
+  },
+  "country": {
+    "dbKey": "queue"
+  },
+  "language": {
+    "dbKey": "queue"
+  },
+  "mysqlQueue": {
+      "base": {
+          "dbKey": "queue"
+      }
+  },
+  "validation": {
+    "@default": "밸리데이션 에러",
+    "common/option/boolean": {
+      "ruleset": "empty-or-equal[true]-or-equal[false]",
+      "msg": {
+        "@default": "Invalid optional boolean type value."
+      }
+    }
+  }
+}
