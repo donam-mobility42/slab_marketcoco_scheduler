@@ -8,10 +8,8 @@
   "language": {
     "dbKey": "queue"
   },
-  "mysqlQueue": {
-      "base": {
-          "dbKey": "queue"
-      }
+  "googleTranslate": {
+    "dbKey": "queue"
   },
   "validation": {
     "@default": "밸리데이션 에러",

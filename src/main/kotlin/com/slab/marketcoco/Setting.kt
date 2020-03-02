@@ -27,7 +27,7 @@ class Setting(e: Environment) : WebSecurityConfigurerAdapter(), WebMvcConfigurer
 
     @PostConstruct
     fun init(){
-        bsLoader(env.settingPathes)
+        bsLoader(env.settingPathes, GoogleTranslateQueue)
         Scheduler.run()
     }
     override fun configure(http: HttpSecurity) {

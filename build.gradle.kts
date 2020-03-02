@@ -21,7 +21,10 @@ repositories {
 }
 dependencies {
     api(project(":ein"))
+    //api(project(":marketcoco"))
+
     implementation(fileTree(mapOf("dir" to "${project.rootDir}/ein/build/libs", "include" to listOf("ein-jvm.jar"))))
+    //implementation(fileTree(mapOf("dir" to "${project.rootDir}/marketcoco/build/libs", "include" to listOf("marketcoco-0.0.1.jar"))))
     implementation("org.springframework.boot:spring-boot-starter-quartz")
     //implementation(kotlin("test-junit"))
     //testImplementation("org.springframework.boot:spring-boot-starter-test") {
