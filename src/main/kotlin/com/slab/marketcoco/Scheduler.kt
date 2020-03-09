@@ -7,6 +7,7 @@ import ein.core.sql.eQuery
 import ein.core.value.eJsonObject
 import ein.core.value.eString
 import ein.core.value.eValue
+import ein.core.value.stringify
 import ein.jvm.crypto.eCrypto
 import ein.jvm.queue.eQueue
 import ein.spring.sql.eMySQL
@@ -35,45 +36,99 @@ object Scheduler{
         }
     }
 }
-
 class GoogleTranslateJob: Job {
-    companion object{
+    companion object:eLoader{
         private val trans by lazy {
             bsTranslateGoogle("AIzaSyDqwslRjN3Lwv1hP7Wc6LLNxp110h3IWXw")
         }
-        const val threadPoolCnt = 5
+        private var wait = true
+        private const val threadPoolCnt = 5
         private val executor  = Executors.newFixedThreadPool(threadPoolCnt)
-    }
-    override fun execute(context: JobExecutionContext) {
-        val q = GoogleTranslateQueue
-        q.getReservedList()?.forEach { (k, v)->
-            (eValue.json(v) as? eJsonObject)?.let{src->
-                executor.execute {
-                    println("번역대상 : $k = ${src.stringify()}")
-                    val from = bsLanguage[src.s("from")]
-                    val to = bsLanguage[src.s("to")]
-                    val args = src.o("data").map {(k,v)->
-                        k to v.v as String
-                    }.toTypedArray()
-                    try{
-                        q.setResult(k, trans.get(from, to, *args).let{data->
-                            eJsonObject().also {
-                                it["from"] = eString(from.code)
-                                it["to"] = eString(to.code)
-                                it["data"] = eValue(data)
-                            }
-                        }.stringify())
-                    }catch (e:Throwable){
-                        println("번역실패 k=$k msg = ${e.message}")
-                    }
+        private lateinit var dbKey:String
+        override fun load(res: eJsonObject) {
+            (res["googleTranslateJob"] as? eJsonObject)?.run {
+                dbKey = s("dbKey")
+                eQuery["inqueue/list"] = {
+                    eQuery("""
+                        select $threadPoolCnt-(select count(*)from inqueue where state=1), inqueue_rowid r,k from inqueue where state=0
+                        limit $threadPoolCnt
+                    """)
+                }
+                eQuery["inqueue/set/reading"] = {
+                    eQuery("update inqueue set state=1 where inqueue_rowid=@r:long@")
+                }
+                eQuery["inqueue/detail/list"] = {
+                    eQuery("select k,v from inqueuedetail where inqueue_rowid=@r:long@")
+                }
+                eQuery["gt/rowid"] = {
+                    eQuery("select gt_rowid from gt where k=@k:string@")
+                }
+                eQuery["gt/add1"] = {
+                    eQuery("insert into gt(k,regdate)values(@k:string@,utc_timestamp())on duplicate key update regdate=values(regdate);select last_insert_id()")
+                }
+                eQuery["gt/add2"] = {
+                    eQuery("insert into gtdetail(gt_rowid,k,v,inv)values(@gt_rowid:long@,@k:string@,@v:string@,@inv:string@)on duplicate key update v=values(v),inv=values(inv)")
+                }
+                eQuery["inqueue/delete"] = {
+                    eQuery("""
+                        delete from inqueuedetail where inqueue_rowid=(select inqueue_rowid from inqueue where k=@k:string@)
+                        ;delete from inqueue where k=@k:string@
+                    """)
                 }
             }
-        }?:let{
-            println("번역할 내용이 없음")
         }
     }
+    override fun execute(context: JobExecutionContext) {
+        inqueueList()?.forEach {(r, k)->
+            println("번역요청 실시 inqueue key = $k")
+            executor.execute {
+                inqueueDetailList(r)?.groupBy {
+                    it.second.s("from")
+                }?.forEach {from, list->
+                    val to = list[0].second.s("to")
+                    val origin = list.toMap()
+                    val r = trans.get(bsLanguage[from], bsLanguage[to], *list.map{(k,v)->
+                        k to v.s("text")
+                    }.toTypedArray())
+                    db.tx {
+                        var gt_rowid = l("gt/rowid", 0L, "k" to k)
+                        if(gt_rowid == 0L) gt_rowid = l("gt/add1", 0L, "k" to k)
+                        if(gt_rowid != 0L) r.forEach {(key,value)->
+                            queryThrow("gt/add2", "gt_rowid" to gt_rowid, "k" to key, "v" to value, "inv" to (origin[key]?.stringify()?:""))
+                        }
+                    }
+                }
+                db.query("inqueue/delete", "k" to k)
+                wait = true
+            }
+        }?:let{
+            if(wait) println("번역 대기중")
+            wait = false
+        }
+    }
+    private val db get() = eMySQL(dbKey)
+    private fun inqueueList():List<Pair<Long,String>>?{
+        var list:List<Pair<Long,String>>? = null
+        db.tx {
+            query("inqueue/list").run{
+                second?.run{
+                    val limit = this[0][0] as Long
+                    list = (if(limit < size.toLong()) take(limit.toInt()) else asList()).map {
+                        val r = "${it[1]}".toLong()
+                        queryThrow("inqueue/set/reading", "r" to r)
+                        r to "${it[2]}"
+                    }
+                    if(list?.isEmpty()?:true) println("inqueue에 아직 처리하는 작업(state=1)이 ${threadPoolCnt}개 이상 남아 있어서 작업수행할 수 없음")
+                }
+            }
+        }
+        return list
+    }
+    private fun inqueueDetailList(r:Long) = db.query("inqueue/detail/list", "r" to r).second?.map{
+        "${it[0]}" to (eValue.json("${it[1]}") as eJsonObject)
+    }
 }
-
+/*
 object GoogleTranslateQueue: eQueue<String, String, String>(), eLoader {
     private const val IN_TABLE = "inqueue"
     private const val OUT_TABLE = "outqueue"
@@ -89,8 +144,8 @@ object GoogleTranslateQueue: eQueue<String, String, String>(), eLoader {
             val db = eMySQL(dbKey)
             eQuery[LIST_OF_RESERVED] = {
                 eQuery("""
-                    |select k,v from $IN_TABLE where isread=0 
-                    |and 0<(select (select count(*)from $IN_TABLE where isread=0)-(select count(*)from $IN_TABLE where isread=1)from dual) 
+                    |select k from inqueue where state=0
+                    |and 0<(select (select count(*)from $IN_TABLE where state=0)-(select count(*)from $IN_TABLE where state=1)from dual) 
                     |limit ${GoogleTranslateJob.threadPoolCnt}
                 """.trimMargin())
             }
@@ -142,4 +197,4 @@ object GoogleTranslateQueue: eQueue<String, String, String>(), eLoader {
     override fun getResult(key: String) = eMySQL(dbKey).s(GET_RESULT, "", "k" to key).let {
         if(it.isBlank()) null else it
     }
-}
+}*/
