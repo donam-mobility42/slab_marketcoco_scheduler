@@ -27,8 +27,6 @@ class Setting(e: Environment) : WebSecurityConfigurerAdapter(), WebMvcConfigurer
 
     @PostConstruct
     fun init(){
-
-        println("Setting init-------")
         bsLoader(env.settingPathes, GoogleTranslateJob)
         Scheduler()
     }

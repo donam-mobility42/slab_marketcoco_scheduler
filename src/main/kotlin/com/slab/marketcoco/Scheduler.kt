@@ -116,7 +116,7 @@ class GoogleTranslateJob: Job {
             val to = list[0].second.s("to")
             val origin = list.toMap()
             trans.get(bsLanguage[from], bsLanguage[to], *list.map{ (k,v)->k to v.s("text")}.toTypedArray()).forEach { (key, value) ->
-                details += mutableListOf("k" to key, "v" to value, "cdata" to cdata(value, to), "inv" to (origin[key]?.stringify()?: ""))
+                details.add(mutableListOf("k" to key, "v" to value, "cdata" to cdata(value, to), "inv" to (origin[key]?.stringify()?: "")))
             }
         }
         return details
