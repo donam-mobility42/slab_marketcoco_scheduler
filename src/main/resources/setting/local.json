@@ -8,5 +8,9 @@
       "pass":"bside",
       "db": "slab_mall_marketcoco_queue"
     }
+  },
+  "googleTranslateJob": {
+    "dbKey": "queue",
+    "transKey": "AIzaSyDqwslRjN3Lwv1hP7Wc6LLNxp110h3IWXw"
   }
 }

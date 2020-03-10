@@ -8,9 +8,6 @@
   "language": {
     "dbKey": "queue"
   },
-  "googleTranslateJob": {
-    "dbKey": "queue"
-  },
   "validation": {
     "@default": "밸리데이션 에러",
     "common/option/boolean": {

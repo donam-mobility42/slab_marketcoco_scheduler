@@ -5,18 +5,14 @@ import com.bsidesoft.translate.bsTranslateGoogle
 import ein.core.resource.eLoader
 import ein.core.sql.eQuery
 import ein.core.value.eJsonObject
-import ein.core.value.eString
 import ein.core.value.eValue
-import ein.core.value.stringify
-import ein.jvm.crypto.eCrypto
-import ein.jvm.queue.eQueue
 import ein.spring.sql.eMySQL
 import org.quartz.*
 import org.quartz.impl.StdSchedulerFactory
 import java.util.concurrent.Executors
 
 object Scheduler{
-    fun run(){
+    operator fun invoke(){
         StdSchedulerFactory.getDefaultScheduler().run{
             start()
             scheduleJob(
@@ -36,21 +32,21 @@ object Scheduler{
         }
     }
 }
+
 class GoogleTranslateJob: Job {
-    companion object:eLoader{
-        private val trans by lazy {
-            bsTranslateGoogle("AIzaSyDqwslRjN3Lwv1hP7Wc6LLNxp110h3IWXw")
-        }
+    companion object: eLoader {
         private var wait = true
         private const val threadPoolCnt = 5
         private val executor  = Executors.newFixedThreadPool(threadPoolCnt)
+        private lateinit var trans:bsTranslateGoogle
         private lateinit var dbKey:String
         override fun load(res: eJsonObject) {
             (res["googleTranslateJob"] as? eJsonObject)?.run {
                 dbKey = s("dbKey")
+                trans = bsTranslateGoogle(s("transKey"))
                 eQuery["inqueue/list"] = {
                     eQuery("""
-                        select $threadPoolCnt-(select count(*)from inqueue where state=1), inqueue_rowid r,k from inqueue where state=0
+                        select $threadPoolCnt-(select count(*)from inqueue where state=1),inqueue_rowid r,k from inqueue where state=0
                         limit $threadPoolCnt
                     """)
                 }
@@ -67,7 +63,7 @@ class GoogleTranslateJob: Job {
                     eQuery("insert into gt(k,regdate)values(@k:string@,utc_timestamp())on duplicate key update regdate=values(regdate);select last_insert_id()")
                 }
                 eQuery["gt/add2"] = {
-                    eQuery("insert into gtdetail(gt_rowid,k,v,inv)values(@gt_rowid:long@,@k:string@,@v:string@,@inv:string@)on duplicate key update v=values(v),inv=values(inv)")
+                    eQuery("insert into gtdetail(gt_rowid,k,v,cdata,inv)values(@gt_rowid:long@,@k:string@,@v:string@,@cdata:string@,@inv:string@)on duplicate key update v=values(v),cdata=values(cdata),inv=values(inv)")
                 }
                 eQuery["inqueue/delete"] = {
                     eQuery("""
@@ -82,23 +78,7 @@ class GoogleTranslateJob: Job {
         inqueueList()?.forEach {(r, k)->
             println("번역요청 실시 inqueue key = $k")
             executor.execute {
-                inqueueDetailList(r)?.groupBy {
-                    it.second.s("from")
-                }?.forEach {from, list->
-                    val to = list[0].second.s("to")
-                    val origin = list.toMap()
-                    val r = trans.get(bsLanguage[from], bsLanguage[to], *list.map{(k,v)->
-                        k to v.s("text")
-                    }.toTypedArray())
-                    db.tx {
-                        var gt_rowid = l("gt/rowid", 0L, "k" to k)
-                        if(gt_rowid == 0L) gt_rowid = l("gt/add1", 0L, "k" to k)
-                        if(gt_rowid != 0L) r.forEach {(key,value)->
-                            queryThrow("gt/add2", "gt_rowid" to gt_rowid, "k" to key, "v" to value, "inv" to (origin[key]?.stringify()?:""))
-                        }
-                    }
-                }
-                db.query("inqueue/delete", "k" to k)
+                gtAdd(k, translate(r))
                 wait = true
             }
         }?:let{
@@ -127,6 +107,38 @@ class GoogleTranslateJob: Job {
     private fun inqueueDetailList(r:Long) = db.query("inqueue/detail/list", "r" to r).second?.map{
         "${it[0]}" to (eValue.json("${it[1]}") as eJsonObject)
     }
+    private fun translate(r:Long):List<MutableList<Pair<String,Any>>>{
+        val details = mutableListOf<MutableList<Pair<String,Any>>>()
+        inqueueDetailList(r)?.groupBy {
+            it.second.s("from") + it.second.s("to")
+        }?.forEach {from, list->
+            val from = list[0].second.s("from")
+            val to = list[0].second.s("to")
+            val origin = list.toMap()
+            trans.get(bsLanguage[from], bsLanguage[to], *list.map{ (k,v)->k to v.s("text")}.toTypedArray()).forEach { (key, value) ->
+                details += mutableListOf("k" to key, "v" to value, "cdata" to cdata(value, to), "inv" to (origin[key]?.stringify()?: ""))
+            }
+        }
+        return details
+    }
+    private fun cdata(v:String, ln:String) = eJsonObject().also {
+        it["cdata"] = eJsonObject().also { data->
+            data["@ln"] = eJsonObject().also {cat->
+                cat[ln] = eValue(v)
+            }
+        }
+    }.stringify()
+    private fun gtAdd(k:String, details:List<MutableList<Pair<String,Any>>>){
+        db.tx {
+            var gt_rowid = l("gt/rowid", 0L, "k" to k)
+            if(gt_rowid == 0L) gt_rowid = l("gt/add1", 0L, "k" to k)
+            if(gt_rowid != 0L) details.forEach {
+                it += "gt_rowid" to gt_rowid
+                queryThrow("gt/add2", *it.toTypedArray())
+            }
+            queryThrow("inqueue/delete", "k" to k)
+        }
+    }
 }
 /*
 object GoogleTranslateQueue: eQueue<String, String, String>(), eLoader {
@@ -145,7 +157,7 @@ object GoogleTranslateQueue: eQueue<String, String, String>(), eLoader {
             eQuery[LIST_OF_RESERVED] = {
                 eQuery("""
                     |select k from inqueue where state=0
-                    |and 0<(select (select count(*)from $IN_TABLE where state=0)-(select count(*)from $IN_TABLE where state=1)from dual) 
+                    |and 0<(select (select count(*)from $IN_TABLE where state=0)-(select count(*)from $IN_TABLE where state=1)from dual)
                     |limit ${GoogleTranslateJob.threadPoolCnt}
                 """.trimMargin())
             }
