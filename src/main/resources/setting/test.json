@@ -1,0 +1,16 @@
+{
+  "mysql":{
+    "queue": {
+      "kind": "mysql",
+      "host":"112.220.245.82",
+      "port":3388,
+      "user":"root",
+      "pass":"bside",
+      "db": "slab_mall_marketcoco_queue"
+    }
+  },
+  "googleTranslateJob": {
+    "dbKey": "queue",
+    "transKey": "AIzaSyDqwslRjN3Lwv1hP7Wc6LLNxp110h3IWXw"
+  }
+}

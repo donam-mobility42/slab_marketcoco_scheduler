@@ -1,0 +1,16 @@
+{
+  "mysql":{
+    "queue": {
+      "kind": "mysql_aurora",
+      "host":"ies-dev-apnortheast2-aurora.cluster-cf2n1sa4jvhv.ap-northeast-2.rds.amazonaws.com",
+      "port":3306,
+      "user":"slabasia",
+      "pass":"2019slabasia*",
+      "db": "slab_mall_marketcoco_queue1"
+    }
+  },
+  "googleTranslateJob": {
+    "dbKey": "queue",
+    "transKey": "AIzaSyDqwslRjN3Lwv1hP7Wc6LLNxp110h3IWXw"
+  }
+}
